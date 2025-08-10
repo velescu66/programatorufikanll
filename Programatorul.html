@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Programator Pacienți — cu edit medici/tratamente și sync</title>
+  <style>
+    :root{--timeline-height:1440px;--time-col-width:70px;--cab-width:300px}
+    *{box-sizing:border-box;font-family:Inter, Roboto, Arial}
+    body{margin:0;background:#f3f4f6;color:#111}
+    .topbar{display:flex;gap:12px;padding:12px;background:#fff;align-items:center;border-bottom:1px solid #e5e7eb}
+    .top-left{font-weight:700;font-size:16px}
+    .actions{display:flex;gap:8px;align-items:center}
+    .btn{padding:8px 12px;border-radius:8px;border:0;background:#2563eb;color:#fff;font-weight:600;cursor:pointer}
+    .btn.ghost{background:#e5e7eb;color:#111}
+    .btn.warn{background:#dc2626}
+    .btn.small{padding:6px 8px;font-size:13px}
+    .app{display:flex;height:calc(100vh - 72px);overflow:hidden}
+    .times{width:var(--time-col-width);background:#fff;border-right:1px solid #e5e7eb;padding:8px 6px;overflow:auto}
+    .times .slot{height:60px;border-bottom:1px dashed #eee;position:relative;padding-left:6px;font-size:12px;color:#666}
+    .board{flex:1;display:flex;overflow:auto;background:linear-gradient(180deg,#fff,#fbfdff)}
+    .cabinet{width:var(--cab-width);min-width:var(--cab-width);border-right:1px solid #e6e7ea;position:relative}
+    .cabinet .header{padding:8px;text-align:center;background:#fafafa;font-weight:700;border-bottom:1px solid #eee;position:sticky;top:0;z-index:3}
+    .timeline{position:relative;height:var(--timeline-height)}
+    .appt{position:absolute;border-radius:8px;padding:4px 8px;color:#111;cursor:grab;display:flex;align-items:center;justify-content:space-between;font-weight:600;box-shadow:0 6px 14px rgba(12,12,12,0.08);overflow:hidden;transition:all .12s ease}
+    .appt .label{z-index:2;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:6px}
+    .appt .meta{font-size:11px;opacity:.9}
+    .appt .resize{position:absolute;right:4px;bottom:3px;width:12px;height:12px;border-radius:2px;background:rgba(255,255,255,0.9);border:1px solid rgba(0,0,0,0.08);cursor:s-resize;z-index:5}
+    .appt.expanded{width:calc(100% + 40px); left: calc( -20px + var(--left-start, 0)); z-index:30; box-shadow:0 12px 30px rgba(12,12,12,0.18)}
+    .appt .zone-left{width:50%;padding-right:6px;box-sizing:border-box;border-right:1px solid rgba(0,0,0,0.06)}
+    .appt .zone-right{width:50%;padding-left:6px;box-sizing:border-box}
+    .modal-back{position:fixed;inset:0;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center}
+    .modal{background:#fff;padding:16px;border-radius:10px;width:560px;box-shadow:0 30px 60px rgba(0,0,0,0.25)}
+    .row{display:flex;gap:8px;margin-bottom:8px}
+    label{font-size:13px;color:#333}
+    input,select,textarea{width:100%;padding:8px;border:1px solid #ddd;border-radius:6px}
+    textarea{min-height:70px}
+    .tooltip{position:fixed;background:rgba(0,0,0,0.88);color:#fff;padding:8px;border-radius:8px;font-size:13px;max-width:360px;display:none;z-index:9999}
+    .sidebar{width:340px;background:#fff;border-left:1px solid #e6e7ea;display:flex;flex-direction:column}
+    .side-header{padding:10px;border-bottom:1px solid #eee;font-weight:700}
+    .side-body{padding:10px;overflow:auto;flex:1}
+    .list-item{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+    .color-dot{width:18px;height:18px;border-radius:6px;border:1px solid rgba(0,0,0,0.06)}
+    .small-input{width:120px}
+    .muted{color:#666;font-size:13px}
+    @media(max-width:980px){:root{--cab-width:240px;--time-col-width:58px}}
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="top-left">Programator Pacienți — cu management medici/tratamente & sync</div>
+    <div style="flex:1"></div>
+    <div class="actions">
+      <button id="btnExport" class="btn small ghost">Export JSON</button>
+      <button id="btnImport" class="btn small ghost">Import JSON</button>
+      <button id="btnSync" class="btn small">Sync → Google Sheets</button>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:0">
+    <div class="app" style="flex:1">
+      <div class="times" id="timesCol"></div>
+      <div class="board" id="board">
+        <div class="cabinet" data-cabinet="1">
+          <div class="header">Cabinet 1</div>
+          <div class="timeline" id="cab1"></div>
+        </div>
+        <div class="cabinet" data-cabinet="2">
+          <div class="header">Cabinet 2</div>
+          <div class="timeline" id="cab2"></div>
+        </div>
+        <div class="cabinet" data-cabinet="3">
+          <div class="header">Cabinet 3</div>
+          <div class="timeline" id="cab3"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- sidebar for managing doctors/treatments & settings -->
+    <div class="sidebar" id="sidebar">
+      <div class="side-header">Administrare</div>
+      <div class="side-body">
+        <div style="margin-bottom:12px">
+          <div style="display:flex;gap:8px;margin-bottom:6px;align-items:center">
+            <b>Medici</b>
+            <button id="btnAddDoctor" class="btn small ghost" style="margin-left:auto">Adaugă</button>
+          </div>
+          <div id="doctorsList"></div>
+        </div>
+
+        <div style="margin-bottom:12px">
+          <div style="display:flex;gap:8px;margin-bottom:6px;align-items:center">
+            <b>Tratamente</b>
+            <button id="btnAddTreat" class="btn small ghost" style="margin-left:auto">Adaugă</button>
+          </div>
+          <div id="treatList"></div>
+        </div>
+
+        <div style="border-top:1px solid #eee;padding-top:10px">
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+            <b>Sincronizare Google</b>
+          </div>
+          <div style="margin-bottom:6px" class="muted">URL Apps Script (doPost)</div>
+          <input id="gsUrl" placeholder="https://script.google.com/macros/..." />
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button id="btnPush" class="btn small">Trimite</button>
+            <button id="btnPull" class="btn small ghost">Încarcă</button>
+          </div>
+          <div id="syncStatus" class="muted" style="margin-top:8px;font-size:13px"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- modal create/edit appointment -->
+  <div id="modal" style="display:none">
+    <div class="modal-back" id="modalBack">
+      <div class="modal" role="dialog" aria-modal="true">
+        <h3 id="modalTitle">Adaugă/Editează programare</h3>
+        <div class="row"><div style="flex:1"><label>Nume pacient</label><input id="inpName" placeholder="Prenume Nume"></div><div style="width:110px"><label>Vârstă</label><input id="inpAge" type="number" min="0"></div></div>
+        <div class="row"><div style="flex:1"><label>Medic</label><select id="inpDoctor"></select></div><div style="flex:1"><label>Tratament</label><select id="inpTreat"></select></div></div>
+        <div class="row"><div style="flex:1"><label>Cabinet</label><select id="inpCab"></select></div><div style="width:140px"><label>Start (HH:MM)</label><input id="inpStart" value="09:00"></div><div style="width:120px"><label>Durată (min)</label><input id="inpDur" value="30" type="number"></div></div>
+        <div class="row"><div style="flex:1"><label>Mentiuni</label><textarea id="inpNotes"></textarea></div></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+          <button id="btnCancel" class="btn ghost">Anulează</button>
+          <button id="btnDelete" class="btn warn">Șterge</button>
+          <button id="btnSave" class="btn">Salvează</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tooltip" id="tooltip"></div>
+
+  <script>
+    // --- Data model (persisted in localStorage)
+    // doctors: [{id, nume, culoare}]
+    // treatments: [{id, nume, culoare}]
+    // appts: [{id,cab,startMin,dur,name,age,doctorId,treatId,notes,date}]
+    const STORAGE_KEY = 'prog_app_v1';
+    let doctors = [];
+    let treatments = [];
+    let appts = [];
+    let selectedDate = (new Date()).toISOString().slice(0,10);
+
+    // DOM refs
+    const timesCol = document.getElementById('timesCol');
+    const tooltip = document.getElementById('tooltip');
+    const inpDoctor = document.getElementById('inpDoctor');
+    const inpTreat = document.getElementById('inpTreat');
+    const inpCab = document.getElementById('inpCab');
+
+    // sidebar lists
+    const doctorsList = document.getElementById('doctorsList');
+    const treatList = document.getElementById('treatList');
+
+    // sync UI
+    const gsUrl = document.getElementById('gsUrl');
+    const syncStatus = document.getElementById('syncStatus');
+
+    // modal inputs
+    const modal = document.getElementById('modal');
+    const btnCancel = document.getElementById('btnCancel');
+    const btnSave = document.getElementById('btnSave');
+    const btnDelete = document.getElementById('btnDelete');
+    const inpName = document.getElementById('inpName');
+    const inpAge = document.getElementById('inpAge');
+    const inpStart = document.getElementById('inpStart');
+    const inpDur = document.getElementById('inpDur');
+    const inpNotes = document.getElementById('inpNotes');
+
+    // init times column
+    for(let h=0;h<24;h++){
+      const div=document.createElement('div'); div.className='slot'; div.style.height='60px'; div.textContent=String(h).padStart(2,'0')+':00'; timesCol.appendChild(div);
+    }
+
+    // utilities
+    function uid(prefix='id'){ return prefix + Math.floor(Date.now() + Math.random()*10000).toString(36) }
+    function hhmmToMin(str){ const p=str.split(':').map(x=>parseInt(x)||0); return p[0]*60 + p[1]; }
+    function minToHhmm(m){ const hh=Math.floor(m/60); const mm=m%60; return String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0'); }
+    function hexToRgba(hex,alpha){ const h=hex.replace('#',''); const r=parseInt(h.slice(0,2),16), g=parseInt(h.slice(2,4),16), b=parseInt(h.slice(4,6),16); return `rgba(${r},${g},${b},${alpha})` }
+    function rangesOverlap(a1,a2,b1,b2){ return a1 < b2 && b1 < a2; }
+    function minToPx(m){ return m; }
+    function pxToMin(px){ return Math.max(0, Math.min(1439, Math.round(px))); }
+
+    // load/save local
+    function saveLocal(){
+      const payload = {doctors, treatments, appts};
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    }
+    function loadLocal(){
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(!raw) return false;
+      try{ const p = JSON.parse(raw); doctors = p.doctors||[]; treatments = p.treatments||[]; appts = p.appts||[]; return true; } catch(e){ return false; }
+    }
+
+    // bootstrap defaults if no data
+    function bootstrapDefaults(){
+      if(doctors.length===0){
+        doctors = [
+          {id:'d1',nume:'Dr. Andrei Pop', culoare:'#ef6c6c'},
+          {id:'d2',nume:'Dr. Maria Ionescu', culoare:'#f39c12'},
+          {id:'d3',nume:'Dr. Radu Enache', culoare:'#4fd1c5'}
+        ];
+      }
+      if(treatments.length===0){
+        treatments = [
+          {id:'t1',nume:'Protetica', culoare:'#ffecee'},
+          {id:'t2',nume:'Parodontologie', culoare:'#fff8e6'},
+          {id:'t3',nume:'Endodontie', culoare:'#effaf5'}
+        ];
+      }
+      if(appts.length===0){
+        const today = (new Date()).toISOString().slice(0,10);
+        appts.push({id:'a'+Date.now(),cab:1,startMin:9*60,dur:45,name:'Ioana M.',age:33,doctorId:'d2',treatId:'t1',notes:'Prima vizită',date:today});
+      }
+    }
+
+    // render doctors/treats lists in sidebar (editable)
+    function renderSidebarLists(){
+      doctorsList.innerHTML = '';
+      doctors.forEach(d=>{
+        const div = document.createElement('div'); div.className='list-item';
+        const dot = document.createElement('div'); dot.className='color-dot'; dot.style.background = d.culoare;
+        const name = document.createElement('div'); name.textContent = d.nume; name.style.flex = '1';
+        const colorInput = document.createElement('input'); colorInput.type='color'; colorInput.value=d.culoare; colorInput.title='Schimbă culoare';
+        colorInput.oninput = (ev)=>{ d.culoare = ev.target.value; dot.style.background = d.culoare; saveLocal(); renderAll(); renderDoctorSelects(); };
+        const editBtn = document.createElement('button'); editBtn.className='btn small ghost'; editBtn.textContent='Edit'; editBtn.onclick = ()=>{ const newName = prompt('Nume medic:', d.nume); if(newName){ d.nume = newName; saveLocal(); renderSidebarLists(); renderDoctorSelects(); renderAll(); } }
+        const delBtn = document.createElement('button'); delBtn.className='btn small'; delBtn.textContent='Șterge'; delBtn.onclick = ()=>{
+          if(confirm('Ștergi medicul? (vor rămâne programările cu referință la acest medic)')){
+            doctors = doctors.filter(x=>x.id!==d.id);
+            saveLocal(); renderSidebarLists(); renderDoctorSelects(); renderAll();
+          }
+        }
+        div.appendChild(dot); div.appendChild(name); div.appendChild(colorInput); div.appendChild(editBtn); div.appendChild(delBtn);
+        doctorsList.appendChild(div);
+      });
+
+      treatList.innerHTML = '';
+      treatments.forEach(t=>{
+        const div = document.createElement('div'); div.className='list-item';
+        const dot = document.createElement('div'); dot.className='color-dot'; dot.style.background = t.culoare;
+        const name = document.createElement('div'); name.textContent = t.nume; name.style.flex = '1';
+        const colorInput = document.createElement('input'); colorInput.type='color'; colorInput.value=t.culoare;
+        colorInput.oninput = (ev)=>{ t.culoare = ev.target.value; dot.style.background = t.culoare; saveLocal(); renderAll(); renderTreatSelects(); };
+        const editBtn = document.createElement('button'); editBtn.className='btn small ghost'; editBtn.textContent='Edit'; editBtn.onclick = ()=>{ const newName = prompt('Nume tratament:', t.nume); if(newName){ t.nume = newName; saveLocal(); renderSidebarLists(); renderTreatSelects(); renderAll(); } }
+        const delBtn = document.createElement('button'); delBtn.className='btn small'; delBtn.textContent='Șterge'; delBtn.onclick = ()=>{
+          if(confirm('Ștergi tratamentul? (vor rămâne programările cu referință la acest tratament)')){
+            treatments = treatments.filter(x=>x.id!==t.id);
+            saveLocal(); renderSidebarLists(); renderTreatSelects(); renderAll();
+          }
+        }
+        div.appendChild(dot); div.appendChild(name); div.appendChild(colorInput); div.appendChild(editBtn); div.appendChild(delBtn);
+        treatList.appendChild(div);
+      });
+    }
+
+    // render selects inside modal
+    function renderDoctorSelects(){
+      inpDoctor.innerHTML='';
+      doctors.forEach(d=>{ const o=document.createElement('option'); o.value=d.id; o.textContent=d.nume; inpDoctor.appendChild(o); });
+    }
+    function renderTreatSelects(){
+      inpTreat.innerHTML='';
+      treatments.forEach(t=>{ const o=document.createElement('option'); o.value=t.id; o.textContent=t.nume; inpTreat.appendChild(o); });
+    }
+    function renderCabSelect(){
+      inpCab.innerHTML=''; [1,2,3].forEach(c=>{ const o=document.createElement('option'); o.value=c; o.textContent='Cabinet '+c; inpCab.appendChild(o); });
+    }
+
+    // render all appointments
+    function renderAll(){
+      [1,2,3].forEach(c=>{
+        const container = document.getElementById('cab'+c);
+        container.innerHTML = '';
+        for(let h=0;h<=24;h++){
+          const line=document.createElement('div');
+          line.className='hour-line';
+          line.style.top=(h*60)+'px';
+          line.style.position='absolute';
+          line.style.left=0; line.style.right=0;
+          line.style.borderTop='1px solid rgba(0,0,0,0.03)';
+          container.appendChild(line);
+        }
+        const list = appts.filter(a=>a.cab==c && a.date===selectedDate);
+        list.sort((a,b)=>a.startMin - b.startMin);
+        list.forEach(a=>{
+          const doc = doctors.find(d=>d.id===a.doctorId) || {nume:'--', culoare:'#ddd'};
+          const tr = treatments.find(t=>t.id===a.treatId) || {nume:'--', culoare:'#fff'};
+          const el = document.createElement('div'); el.className='appt'; el.dataset.id = a.id;
+          const top = minToPx(a.startMin); const height = Math.max(18,a.dur);
+          el.style.top = top+'px'; el.style.height = height+'px';
+          el.style.left = '8px'; el.style.right = '8px';
+          // background gradient from doctor color to treatment color for readability
+          const leftCol = hexToRgba(doc.culoare,0.92), rightCol = hexToRgba(tr.culoare,0.95);
+          el.style.background = `linear-gradient(90deg, ${leftCol} 0%, ${leftCol} 48%, ${rightCol} 52%, ${rightCol} 100%)`;
+          el.style.setProperty('--left-start', '8px');
+
+          const leftZone = document.createElement('div'); leftZone.className='zone-left'; leftZone.innerHTML = `<div class="label">${a.name} ${a.age?('('+a.age+')'):''}</div><div class="meta">${doc.nume} • ${minToHhmm(a.startMin)}</div>`;
+          const rightZone = document.createElement('div'); rightZone.className='zone-right'; rightZone.innerHTML = `<div class="meta">${tr.nume}</div>`;
+          const resize = document.createElement('div'); resize.className='resize';
+          el.appendChild(leftZone); el.appendChild(rightZone); el.appendChild(resize);
+
+          el.addEventListener('mouseenter',(ev)=>{ el.classList.add('expanded'); showTooltip(a, ev.pageX, ev.pageY); });
+          el.addEventListener('mousemove',(ev)=>{ moveTooltip(ev.pageX, ev.pageY); });
+          el.addEventListener('mouseleave',()=>{ el.classList.remove('expanded'); hideTooltip(); });
+
+          el.addEventListener('click',(ev)=>{ ev.stopPropagation(); openModalForEdit(a); });
+
+          container.appendChild(el);
+          attachInteractions(el);
+        });
+      });
+    }
+
+    // tooltip
+    function showTooltip(a,x,y){
+      const doc = doctors.find(d=>d.id===a.doctorId);
+      const tr = treatments.find(t=>t.id===a.treatId);
+      tooltip.innerHTML = `<strong>${a.name}</strong><br>${a.age?('Vârsta: '+a.age+'<br>'):''}${doc?('Medic: '+doc.nume+'<br>'):''}${tr?('Tratament: '+tr.nume+'<br>'):''}${a.notes?('Mentiuni: '+a.notes):''}`;
+      tooltip.style.display='block'; moveTooltip(x,y);
+    }
+    function moveTooltip(x,y){ tooltip.style.left = (x+12)+'px'; tooltip.style.top = (y+12)+'px'; }
+    function hideTooltip(){ tooltip.style.display='none'; }
+
+    // modal logic (create/edit)
+    let editingId = null;
+    function openModalForNew(cab, startMin){
+      editingId = null; modal.style.display='block';
+      document.getElementById('modalTitle').textContent='Adaugă programare';
+      inpName.value=''; inpAge.value=''; inpDoctor.value = (doctors[0]&&doctors[0].id) || '';
+      inpTreat.value = (treatments[0]&&treatments[0].id) || '';
+      inpCab.value = cab || 1; inpStart.value = minToHhmm(startMin||9*60); inpDur.value = 30; inpNotes.value = '';
+      btnDelete.style.display = 'none';
+    }
+    function openModalForEdit(ap){
+      editingId = ap.id; modal.style.display='block';
+      document.getElementById('modalTitle').textContent='Editează programare';
+      inpName.value = ap.name; inpAge.value = ap.age||''; inpDoctor.value = ap.doctorId; inpTreat.value=ap.treatId; inpCab.value = ap.cab; inpStart.value = minToHhmm(ap.startMin); inpDur.value = ap.dur; inpNotes.value = ap.notes||'';
+      btnDelete.style.display = 'inline-block';
+    }
+
+    btnCancel.onclick = ()=>{ modal.style.display='none'; }
+
+    btnSave.onclick = ()=>{
+      const name = inpName.value || 'Anonim';
+      const age = inpAge.value || '';
+      const doctorId = inpDoctor.value;
+      const treatId = inpTreat.value;
+      const cabsel = Number(inpCab.value);
+      const startMinVal = hhmmToMin(inpStart.value);
+      const dur = Math.max(5, parseInt(inpDur.value)||30);
+      const notes = inpNotes.value||'';
+      if(editingId){
+        const ap = appts.find(a=>a.id===editingId);
+        if(ap){
+          ap.name = name; ap.age = age; ap.doctorId = doctorId; ap.treatId = treatId; ap.cab = cabsel;
+          ap.startMin = startMinVal; ap.dur = dur; ap.notes = notes; ap.date = selectedDate;
+        }
+      } else {
+        appts.push({id: uid('a'), cab:cabsel, startMin:startMinVal, dur, name, age, doctorId, treatId, notes, date:selectedDate});
+      }
+      saveLocal(); modal.style.display='none'; renderAll();
+    };
+
+    btnDelete.onclick = ()=>{
+      if(editingId && confirm('Ștergi această programare?')){
+        appts = appts.filter(a=>a.id !== editingId);
+        saveLocal(); modal.style.display='none'; renderAll();
+      }
+    }
+
+    // dblclick to create with prefilled start
+    document.querySelectorAll('.timeline').forEach(tl=>{
+      tl.ondblclick = (e)=>{
+        const rect = tl.getBoundingClientRect();
+        const y = e.clientY - rect.top;
+        const startMin = Math.max(0, Math.min(1439, Math.floor(y)));
+        const cabinet = Number(tl.id.replace('cab',''));
+        openModalForNew(cabinet, startMin);
+      }
+    });
+
+    // dragging/resizing
+    let dragState = null;
+    function attachInteractions(el){
+      const id = el.dataset.id;
+      el.addEventListener('pointerdown', (ev)=>{
+        ev.preventDefault(); el.setPointerCapture(ev.pointerId);
+        const rect = el.getBoundingClientRect();
+        const parentRect = el.parentElement.getBoundingClientRect();
+        const isResizing = ev.target.classList.contains('resize');
+        dragState = { id, startY:ev.clientY, startTop:rect.top - parentRect.top, startH:rect.height, isResizing, fromCab:+el.parentElement.id.replace('cab','') };
+      });
+      document.addEventListener('pointermove', onPointerMove);
+      document.addEventListener('pointerup', onPointerUp);
+    }
+    function onPointerMove(ev){
+      if(!dragState) return;
+      const el = document.querySelector(`[data-id="${dragState.id}"]`); if(!el) return;
+      if(dragState.isResizing){
+        const dy = ev.clientY - dragState.startY;
+        const newH = Math.max(10, dragState.startH + dy);
+        el.style.height = newH + 'px';
+      } else {
+        const dy = ev.clientY - dragState.startY;
+        const newTop = Math.max(0, dragState.startTop + dy);
+        el.style.top = newTop + 'px';
+        // highlight cabinet
+        const boardRect = document.getElementById('board').getBoundingClientRect();
+        const relX = ev.clientX - boardRect.left;
+        const cabWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--cab-width'));
+        const cabIdx = Math.floor(relX / cabWidth);
+        document.querySelectorAll('.cabinet').forEach((c,i)=> c.style.outline = (i===cabIdx? '2px dashed rgba(37,99,235,0.35)':'none') );
+      }
+    }
+    function onPointerUp(ev){
+      if(!dragState) return;
+      const el = document.querySelector(`[data-id="${dragState.id}"]`); if(!el){ dragState=null; return; }
+      try{ el.releasePointerCapture(ev.pointerId); }catch(e){}
+      document.querySelectorAll('.cabinet').forEach(c=> c.style.outline='none');
+      const ap = appts.find(a=>a.id===dragState.id); if(!ap){ dragState=null; return; }
+      if(dragState.isResizing){
+        const h = parseFloat(el.style.height);
+        ap.dur = Math.max(5, Math.round(h));
+      } else {
+        const top = parseFloat(el.style.top);
+        ap.startMin = pxToMin(top);
+        const boardRect = document.getElementById('board').getBoundingClientRect();
+        const relX = ev.clientX - boardRect.left;
+        const cabWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--cab-width'));
+        const newCab = Math.floor(relX / cabWidth ) + 1;
+        if(newCab>=1 && newCab<=3) ap.cab = newCab;
+      }
+      dragState=null; saveLocal(); renderAll();
+    }
+
+    // sidebar add buttons
+    document.getElementById('btnAddDoctor').onclick = ()=>{
+      const name = prompt('Nume medic nou:');
+      if(name){ doctors.push({id:uid('d'), nume:name, culoare:'#'+Math.floor(Math.random()*16777215).toString(16).padStart(6,'0')}); saveLocal(); renderSidebarLists(); renderDoctorSelects(); renderAll(); }
+    };
+    document.getElementById('btnAddTreat').onclick = ()=>{
+      const name = prompt('Nume tratament nou:');
+      if(name){ treatments.push({id:uid('t'), nume:name, culoare:'#'+Math.floor(Math.random()*16777215).toString(16).padStart(6,'0')}); saveLocal(); renderSidebarLists(); renderTreatSelects(); renderAll(); }
+    };
+
+    // Export / Import
+    document.getElementById('btnExport').onclick = ()=>{
+      const payload = {doctors, treatments, appts};
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'programari-backup.json'; a.click(); URL.revokeObjectURL(url);
+    };
+    document.getElementById('btnImport').onclick = ()=>{
+      const input = document.createElement('input'); input.type='file'; input.accept='application/json';
+      input.onchange = (e)=>{
+        const f = e.target.files[0]; if(!f) return;
+        const reader = new FileReader(); reader.onload = ()=>{
+          try{
+            const p = JSON.parse(reader.result);
+            if(p.doctors && p.treatments && p.appts){
+              doctors = p.doctors; treatments = p.treatments; appts = p.appts; saveLocal(); renderSidebarLists(); renderDoctorSelects(); renderTreatSelects(); renderAll(); alert('Import reușit');
+            } else alert('Format JSON invalid');
+          }catch(err){ alert('Eroare la parsare JSON'); }
+        }; reader.readAsText(f);
+      };
+      input.click();
+    };
+
+    // Google Sheets sync (Apps Script endpoint)
+    // NOTE: trebuie să publici un Apps Script ca web app (Anyone, even anonymous) care acceptă POST/GET.
+    // Buton Push => trimite tot payload-ul (doctors,treatments,appts) în body JSON {action:'push', payload: ...}
+    // Buton Pull => cere date de pe server {action:'pull'} și înlocuiește local (atenție: suprascrie)
+    document.getElementById('btnPush').onclick = async ()=>{
+      const url = gsUrl.value.trim(); if(!url){ alert('Introdu URL-ul Apps Script'); return; }
+      syncStatus.textContent = 'Trimit...';
+      try{
+        const body = {action:'push', payload:{doctors,treatments,appts}};
+        const resp = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+        const j = await resp.json();
+        syncStatus.textContent = 'Răspuns: '+ (j && j.status ? j.status : 'ok');
+      }catch(e){ syncStatus.textContent = 'Eroare: '+ (e.message||e); }
+    };
+    document.getElementById('btnPull').onclick = async ()=>{
+      const url = gsUrl.value.trim(); if(!url){ alert('Introdu URL-ul Apps Script'); return; }
+      if(!confirm('Încarcă date de pe server (vor suprascrie datele locale)?')) return;
+      syncStatus.textContent = 'Încarc...';
+      try{
+        const body = {action:'pull'};
+        const resp = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+        const j = await resp.json();
+        if(j && j.payload){
+          doctors = j.payload.doctors||[]; treatments = j.payload.treatments||[]; appts = j.payload.appts||[];
+          saveLocal(); renderSidebarLists(); renderDoctorSelects(); renderTreatSelects(); renderAll();
+          syncStatus.textContent = 'Import reușit';
+        } else {
+          syncStatus.textContent = 'Răspuns invalid';
+        }
+      }catch(e){ syncStatus.textContent = 'Eroare: '+ (e.message||e); }
+    };
+
+    // initial load
+    (function init(){
+      const ok = loadLocal();
+      if(!ok) { bootstrapDefaults(); saveLocal(); }
+      renderSidebarLists(); renderDoctorSelects(); renderTreatSelects(); renderCabSelect(); renderAll();
+      // sample: doubleclick on timeline opens modal; document click hides modal
+      document.addEventListener('click', ()=>{ /*click outside appointments*/ });
+      // keyboard ESC to close modal
+      document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') modal.style.display='none'; });
+    })();
+
+    // small: allow clicking on empty timeline to create at that location
+    document.querySelectorAll('.timeline').forEach(tl=>{
+      tl.addEventListener('click', (e)=>{
+        // if clicked directly on timeline (not an appointment)
+        if(e.target.classList.contains('timeline') || e.target.classList.contains('hour-line')){
+          const rect = tl.getBoundingClientRect();
+          const y = e.clientY - rect.top;
+          const startMin = Math.max(0, Math.min(1439, Math.floor(y)));
+          const cabinet = Number(tl.id.replace('cab',''));
+          openModalForNew(cabinet, startMin);
+        }
+      });
+    });
+
+    // expose function for easier testing in console
+    window._app = {doctors,treatments,appts,saveLocal,renderAll};
+  </script>
+</body>
+</html>
